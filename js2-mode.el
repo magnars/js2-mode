@@ -305,6 +305,13 @@ If `js2-dynamic-idle-timer-adjust' is 0 or negative,
   :type 'boolean
   :group 'js2-mode)
 
+(defcustom js2-concat-multiline-strings t
+  "Non-nil to automatically turn a newline in mid-string into a
+string concatenation.  When `eol', the '+' will be inserted at the
+end of the line, otherwise, at the beginning of the next line."
+  :type '(choice (const t) (const eol) (const nil))
+  :group 'js2-mode)
+
 (defcustom js2-mode-squeeze-spaces t
   "Non-nil to normalize whitespace when filling in comments.
 Multiple runs of spaces are converted to a single space."
@@ -2110,17 +2117,17 @@ modifications to the buffer."
   (declare (indent 0) (debug t))
   (let ((modified (make-symbol "modified")))
     `(let ((,modified (buffer-modified-p))
-	   (inhibit-read-only t)
-	   (inhibit-modification-hooks t)
-	   (buffer-undo-list t)
-	   (deactivate-mark nil)
-	   ;; Apparently these avoid file locking problems.
-	   (buffer-file-name nil)
-	   (buffer-file-truename nil))
+           (inhibit-read-only t)
+           (inhibit-modification-hooks t)
+           (buffer-undo-list t)
+           (deactivate-mark nil)
+           ;; Apparently these avoid file locking problems.
+           (buffer-file-name nil)
+           (buffer-file-truename nil))
        (unwind-protect
-	   (progn ,@body)
-	 (unless ,modified
-	   (restore-buffer-modified-p nil))))))
+           (progn ,@body)
+         (unless ,modified
+           (restore-buffer-modified-p nil))))))
 
 (defmacro js2-with-underscore-as-word-syntax (&rest body)
   "Evaluate BODY with the _ character set to be word-syntax."
@@ -9881,8 +9888,8 @@ a comma)."
     (or (js-looking-at-operator-p)
         ;; comment
         (and (js-re-search-backward "\n" nil t)
-	     (progn
-	       (skip-chars-backward " \t")
+             (progn
+               (skip-chars-backward " \t")
                (unless (bolp)
                  (backward-char)
                  (and (js-looking-at-operator-p)
@@ -9899,20 +9906,20 @@ indented to the same column as the current line."
   (save-excursion
     (save-match-data
       (when (looking-at "\\s-*\\<while\\>")
-	(if (save-excursion
-	      (skip-chars-backward "[ \t\n]*}")
-	      (looking-at "[ \t\n]*}"))
-	    (save-excursion
-	      (backward-list) (backward-word 1) (looking-at "\\<do\\>"))
-	  (js-re-search-backward "\\<do\\>" (point-at-bol) t)
-	  (or (looking-at "\\<do\\>")
-	      (let ((saved-indent (current-indentation)))
-		(while (and (js-re-search-backward "^[ \t]*\\<" nil t)
-			    (/= (current-indentation) saved-indent)))
-		(and (looking-at "[ \t]*\\<do\\>")
-		     (not (js-re-search-forward
-			   "\\<while\\>" (point-at-eol) t))
-		     (= (current-indentation) saved-indent)))))))))
+        (if (save-excursion
+              (skip-chars-backward "[ \t\n]*}")
+              (looking-at "[ \t\n]*}"))
+            (save-excursion
+              (backward-list) (backward-word 1) (looking-at "\\<do\\>"))
+          (js-re-search-backward "\\<do\\>" (point-at-bol) t)
+          (or (looking-at "\\<do\\>")
+              (let ((saved-indent (current-indentation)))
+                (while (and (js-re-search-backward "^[ \t]*\\<" nil t)
+                            (/= (current-indentation) saved-indent)))
+                (and (looking-at "[ \t]*\\<do\\>")
+                     (not (js-re-search-forward
+                           "\\<while\\>" (point-at-eol) t))
+                     (= (current-indentation) saved-indent)))))))))
 
 (defun js-multiline-decl-indentation ()
   "Returns the declaration indentation column if the current line belongs
@@ -10472,7 +10479,7 @@ If so, we don't ever want to use bounce-indent."
   ;; (examples:  doxymacs, column-marker).
   ;; To customize highlighted keywords, use `font-lock-add-keywords'.
   (setq font-lock-defaults '(nil t))
-  
+
   ;; Experiment:  make reparse-delay longer for longer files.
   (if (plusp js2-dynamic-idle-timer-adjust)
       (setq js2-idle-timer-delay
@@ -10760,7 +10767,9 @@ This ensures that the counts and `next-error' are correct."
     (cond
      ;; check if we're inside a string
      ((nth 3 parse-status)
-      (js2-mode-split-string parse-status))
+      (if js2-concat-multiline-strings
+          (js2-mode-split-string parse-status)
+        (insert "\n")))
      ;; check if inside a block comment
      ((nth 4 parse-status)
       (js2-mode-extend-comment))
@@ -10779,6 +10788,7 @@ PARSE-STATUS is as documented in `parse-partial-sexp'."
          (quote-char (nth 3 parse-status))
          (quote-string (string quote-char))
          (string-beg (nth 8 parse-status))
+         (at-eol (eq js2-concat-multiline-strings 'eol))
          (indent (save-match-data
                    (or
                     (save-excursion
@@ -10790,8 +10800,14 @@ PARSE-STATUS is as documented in `parse-partial-sexp'."
                       (if (looking-back "\\+\\s-+")
                           (goto-char (match-beginning 0)))
                       (current-column))))))
-    (insert quote-char " +\n")
+    (insert quote-char)
+    (if at-eol
+        (insert " +\n")
+      (insert "\n"))
+    ;; FIXME: This does not match the behavior of `js2-indent-line'.
     (indent-to indent)
+    (unless at-eol
+      (insert "+ "))
     (insert quote-string)
     (when (eolp)
       (insert quote-string)
